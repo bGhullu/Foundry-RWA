@@ -7,6 +7,7 @@ import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/dev/v1_0_0/libraries/FunctionsRequest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /*
  * @title dTSLA
@@ -15,8 +16,10 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/Ag
 
 contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     using FunctionsRequest for FunctionsRequest.Request;
+    using Strings for uint256;
 
     error dTSLA_NotEnoughCollateral();
+    error dTSLA_DoesntMeetMinimumWithdrawlAmount();
 
     enum MintOrRedeem {
         mint,
@@ -33,7 +36,8 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     uint256 constant PRECISION = 1e18;
     address constant SEPOLIA_FUNCTIONS_ROUTE =
         0xb83E47C2bC239B3bf370bc41e1459A34b41238D0;
-
+    address constant SEPOLIA_USDC_PRICE_FEED =
+        0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E;
     address constant SEPOLIA_TSLA_PRICE_FEED =
         0xc59E3633BAAC79493d908e63626716e204A45EdF; // This is actually LINK/USD priceFeed for demo purpose
     uint256 constant ADDITIONAL_FEED_PRECISION = 1e10;
@@ -47,14 +51,19 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     // If there is $200 of TSLA in the brokerage, we can mint AT MOST $100 of dTSLA
     uint256 constant COLLATERAL_RATIO = 200; // 200% collateral ratio
     uint256 constant COLLATERAL_PRECISION = 100;
+    uint256 constant MINIMUM_WITHDRAWL_AMOUNT = 100e18;
     string private s_mintSourceCode;
+    string private s_redeemSourceCode;
 
     mapping(bytes32 requestId => dTslaRequest request)
         private s_requestIdToRequest;
+    mapping(address user => uint256 pendingWithdrawlAmount)
+        private s_userToWithdrawlAmount;
 
     constructor(
         string memory mintSourceCode,
-        uint64 subId
+        uint64 subId,
+        string memory redeemSourceCode
     )
         ConfirmedOwner(msg.sender)
         FunctionsClient(SEPOLIA_FUNCTIONS_ROUTE)
@@ -62,6 +71,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     {
         s_mintSourceCode = mintSourceCode;
         i_subId = subId;
+        s_redeemSourceCode = redeemSourceCode;
     }
 
     // Send an HTTP Request to:
@@ -121,12 +131,57 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     // 2. Buy USDC on the bokerage
     // 3. Send USDC to this contact for the user to withdraw
 
-    function sendReedemRequest() external {}
+    function sendReedemRequest(uint256 amountdTsla) external {
+        uint256 amountdTslaInUsdc = getUsdcValueOfUsd(
+            getUsdValueOfTsla(amountdTsla)
+        );
+        if (amountdTslaInUsdc < MINIMUM_WITHDRAWL_AMOUNT) {
+            revert dTSLA_DoesntMeetMinimumWithdrawlAmount();
+        }
+        FunctionsRequest.Request memory req;
+        req.initializeRequestForInlineJavaScript(s_redeemSourceCode);
+        string[] memory args = new string[](2);
+        args[0] = amountdTsla.toString();
+        args[1] = amountdTslaInUsdc.toString();
+        req.setArgs(args);
+        bytes32 requestId = _sendRequest(
+            req.encodeCBOR(),
+            i_subId,
+            GAS_LIMIT,
+            DON_ID
+        );
+        s_requestIdToRequest[requestId] = dTslaRequest(
+            amountdTsla,
+            msg.sender,
+            MintOrRedeem.redeem
+        );
+        _burn(msg.sender, amountdTsla);
+    }
 
     function _redeemFulFillRequest(
         bytes32 requestId,
         bytes memory response
-    ) internal {}
+    ) internal {
+        //assume for now this has 18 decimals
+        uint256 usdcAmount = uint256(bytes32(response));
+        if (usdcAmount == 0) {
+            uint256 amountOfdTslaBurned = s_requestIdToRequest[requestId]
+                .amountOfToken;
+            _mint(
+                s_requestIdToRequest[requestId].requester,
+                amountOfdTslaBurned
+            );
+            return;
+        }
+        s_userToWithdrawlAmount[
+            s_requestIdToRequest[requestId].requester
+        ] += usdcAmount;
+    }
+
+    function withdraw() external {
+        uint256 amountToWithdraw = s_userToWithdrawlAmount[msg.sender];
+        s_userToWithdrawlAmount[msg.sender] = 0;
+    }
 
     function fulfillRequest(
         bytes32 requestId,
@@ -160,9 +215,29 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
             PRECISION;
     }
 
+    function getUsdcValueOfUsd(
+        uint256 usdAmount
+    ) public view returns (uint256) {
+        return (getUsdcPrice() * usdAmount) / PRECISION;
+    }
+
+    function getUsdValueOfTsla(
+        uint256 tslaAmount
+    ) public view returns (uint256) {
+        return (tslaAmount * getTslaPrice()) / PRECISION;
+    }
+
     function getTslaPrice() public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             SEPOLIA_TSLA_PRICE_FEED
+        );
+        (, int256 price, , , ) = priceFeed.latestRoundData();
+        return uint256(price) * ADDITIONAL_FEED_PRECISION; // To have 18 decimals
+    }
+
+    function getUsdcPrice() public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(
+            SEPOLIA_USDC_PRICE_FEED
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         return uint256(price) * ADDITIONAL_FEED_PRECISION; // To have 18 decimals
