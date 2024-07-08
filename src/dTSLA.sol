@@ -20,6 +20,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
 
     error dTSLA_NotEnoughCollateral();
     error dTSLA_DoesntMeetMinimumWithdrawlAmount();
+    error dTSLA_TRNASFER_FAILED();
 
     enum MintOrRedeem {
         mint,
@@ -34,6 +35,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
 
     // Math constants
     uint256 constant PRECISION = 1e18;
+    address constant SEPOLIA_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant SEPOLIA_FUNCTIONS_ROUTE =
         0xb83E47C2bC239B3bf370bc41e1459A34b41238D0;
     address constant SEPOLIA_USDC_PRICE_FEED =
@@ -181,6 +183,11 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     function withdraw() external {
         uint256 amountToWithdraw = s_userToWithdrawlAmount[msg.sender];
         s_userToWithdrawlAmount[msg.sender] = 0;
+        bool succcess = ERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48)
+            .transfer(msg.sender, amountToWithdraw);
+        if (!succcess) {
+            revert dTSLA_TRNASFER_FAILED();
+        }
     }
 
     function fulfillRequest(
@@ -241,5 +248,41 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
         return uint256(price) * ADDITIONAL_FEED_PRECISION; // To have 18 decimals
+    }
+
+    function getRequest(
+        bytes32 requestId
+    ) public view returns (dTslaRequest memory) {
+        return s_requestIdToRequest[requestId];
+    }
+
+    function getPendingWithdrawlAmount(
+        address user
+    ) public view returns (uint256) {
+        return s_userToWithdrawlAmount[user];
+    }
+
+    function getPortfolioBalance() public view returns (uint256) {
+        return s_portfolioBalance;
+    }
+
+    function getSubId() public view returns (uint64) {
+        return i_subId;
+    }
+
+    function getMintSouceCode() public view returns (string memory) {
+        return s_mintSourceCode;
+    }
+
+    function getRedeemSourceCode() public view returns (string memory) {
+        return s_redeemSourceCode;
+    }
+
+    function getCollateralRatio() public pure returns (uint256) {
+        return COLLATERAL_RATIO;
+    }
+
+    function getCollateralPrecision() public pure returns (uint256) {
+        return COLLATERAL_PRECISION;
     }
 }
