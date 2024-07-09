@@ -56,6 +56,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     uint256 constant MINIMUM_WITHDRAWL_AMOUNT = 100e18;
     string private s_mintSourceCode;
     string private s_redeemSourceCode;
+    bytes32 private s_mostRecentRequestId;
 
     mapping(bytes32 requestId => dTslaRequest request)
         private s_requestIdToRequest;
@@ -97,6 +98,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
             GAS_LIMIT,
             DON_ID
         );
+        s_mostRecentRequestId = requestId;
         s_requestIdToRequest[requestId] = dTslaRequest(
             amount,
             msg.sender,
@@ -163,6 +165,7 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
             msg.sender,
             MintOrRedeem.redeem
         );
+        s_mostRecentRequestId = requestId;
         _burn(msg.sender, amountdTsla);
     }
 
@@ -206,6 +209,16 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
         } else {
             _redeemFulFillRequest(requestId, response);
         }
+    }
+
+    function finishMint() external onlyOwner {
+        uint256 amountOfTokensToMint = s_requestIdToRequest[
+            s_mostRecentRequestId
+        ].amountOfToken;
+        _mint(
+            s_requestIdToRequest[s_mostRecentRequestId].requester,
+            amountOfTokensToMint
+        );
     }
 
     function _getCollateralRatioAdjustedToTotalBalance(

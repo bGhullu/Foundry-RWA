@@ -14,4 +14,4 @@ const [response] = await Promise.all([alpacaRequest]);
 const portfolioBalance = response.data.portfolio_value;
 console.log("Alpaca Portfolio Balance: $${portfolioBalance}");
 
-return Functions.encodeUint256(Math.round(portfolioBalance));
+return Functions.encodeUint256(Math.round(portfolioBalance * 1e18));
