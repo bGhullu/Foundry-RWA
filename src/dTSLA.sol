@@ -61,6 +61,8 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
         private s_requestIdToRequest;
     mapping(address user => uint256 pendingWithdrawlAmount)
         private s_userToWithdrawlAmount;
+    uint8 donHostedSecretsSlotID = 0;
+    uint64 donHostedSecretsVersion = 1712769962;
 
     constructor(
         string memory mintSourceCode,
@@ -85,6 +87,10 @@ contract dTSLA is ConfirmedOwner, FunctionsClient, ERC20 {
     ) external onlyOwner returns (bytes32) {
         FunctionsRequest.Request memory req;
         req.initializeRequestForInlineJavaScript(s_mintSourceCode);
+        req.addDONHostedSecrets(
+            donHostedSecretsSlotID,
+            donHostedSecretsVersion
+        );
         bytes32 requestId = _sendRequest(
             req.encodeCBOR(),
             i_subId,
