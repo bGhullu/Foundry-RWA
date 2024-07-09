@@ -6,7 +6,7 @@ const {
 } = require("@chainlink/functions-toolkit");
 
 const requestConfig = {
-  source: fs.readFileSync("./functions/sources/alapacaBalance.js").toString(),
+  source: fs.readFileSync("./functions/sources/alpacaBalance.js").toString(),
   codeLocation: Location.Inline,
   secrets: {
     alpacaKey: process.env.ALPACA_API_KEY,

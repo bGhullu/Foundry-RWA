@@ -17,7 +17,7 @@ async function main() {
     );
   }
   if (errorString) {
-    console.log(`Error returned by script: ${errorString}\n`);
+    console.log(`Error returned by script:\n${errorString}\n`);
   }
 }
 
